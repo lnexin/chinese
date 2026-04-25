@@ -1,4 +1,5 @@
 import './styles.css';
+import { recognizeImageFilters } from './lib/aiRecognition.js';
 import { prepareIdioms } from './lib/pinyin.js';
 import { renderLoadError, renderResults } from './lib/render.js';
 import { MAX_RESULTS, buildIndexes, collectFilters, getCandidateIds, getInvalidParts, rankMatches } from './lib/search.js';
@@ -11,6 +12,9 @@ document.querySelector('#app').innerHTML = createAppTemplate();
 const dom = bindDom();
 let idioms = [];
 let indexes = null;
+let aiImageDataUrl = '';
+let aiRecognitionRunId = 0;
+let aiDragDepth = 0;
 
 const debounce = (fn, wait = 120) => {
   let timer = 0;
@@ -38,6 +42,149 @@ async function copyToClipboard(text) {
       console.error(error);
     }
     return ok;
+  }
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener('load', () => resolve(reader.result));
+    reader.addEventListener('error', () => reject(reader.error || new Error('图片读取失败')));
+    reader.readAsDataURL(file);
+  });
+}
+
+function setAiStatus(message, isError = false) {
+  dom.aiStatus.textContent = message;
+  dom.aiStatus.classList.toggle('field-error', isError);
+}
+
+function focusAiRecognition() {
+  const shouldScroll = !dom.aiCard.open || !dom.aiCard.classList.contains('ai-card-dragging');
+  dom.aiCard.open = true;
+  dom.aiCard.classList.add('ai-card-dragging');
+  dom.aiDropZone.classList.add('ai-dropzone-active');
+  dom.aiDropZone.focus({ preventScroll: true });
+  if (shouldScroll) {
+    dom.aiCard.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+}
+
+function clearAiDragFocus() {
+  aiDragDepth = 0;
+  dom.aiCard.classList.remove('ai-card-dragging');
+  dom.aiDropZone.classList.remove('ai-dropzone-active');
+}
+
+function isImageTransfer(dataTransfer) {
+  return Array.from(dataTransfer?.items || []).some((item) => item.kind === 'file' && item.type.startsWith('image/'));
+}
+
+function syncAiImageState() {
+  dom.aiRecognizeButton.disabled = !aiImageDataUrl;
+  dom.aiClearImageButton.disabled = !aiImageDataUrl;
+  dom.aiImagePreview.hidden = !aiImageDataUrl;
+  dom.aiDropZone.classList.toggle('ai-dropzone-ready', Boolean(aiImageDataUrl));
+  if (aiImageDataUrl) {
+    dom.aiImagePreview.src = aiImageDataUrl;
+  } else {
+    dom.aiImagePreview.removeAttribute('src');
+  }
+}
+
+async function setAiImageFromFile(file) {
+  if (!file) {
+    return;
+  }
+
+  if (!file.type.startsWith('image/')) {
+    setAiStatus('请选择图片文件', true);
+    return;
+  }
+
+  aiRecognitionRunId += 1;
+  focusAiRecognition();
+  aiImageDataUrl = await fileToDataUrl(file);
+  setAiStatus(`图片已载入：${file.name || '剪贴板截图'}`);
+  syncAiImageState();
+  await recognizeCurrentAiImage();
+}
+
+async function setAiImageFromFileList(files) {
+  const file = Array.from(files || []).find((item) => item.type.startsWith('image/'));
+  if (!file) {
+    setAiStatus('没有找到可用图片', true);
+    return;
+  }
+
+  await setAiImageFromFile(file);
+}
+
+function joinParts(parts) {
+  return Array.isArray(parts) ? parts.join(' ') : '';
+}
+
+function applyRecognitionFilters(filters) {
+  dom.globalChars.value = filters.globalChars.join('');
+  dom.globalLetters.value = filters.globalParts.join(' ');
+  dom.globalExcludeChars.value = filters.globalExcludeChars.join('');
+
+  filters.fixedChars.forEach((char, index) => {
+    dom.fixedCharInputs[index].value = char;
+  });
+
+  syncPositionLocks();
+
+  filters.tones.forEach((tone, index) => {
+    if (!dom.toneInputs[index].disabled) dom.toneInputs[index].value = tone;
+  });
+  filters.positionParts.forEach((parts, index) => {
+    if (!dom.positionInputs[index].disabled) dom.positionInputs[index].value = joinParts(parts);
+  });
+  filters.excludeTones.forEach((tone, index) => {
+    if (!dom.excludeToneInputs[index].disabled) dom.excludeToneInputs[index].value = tone;
+  });
+  filters.excludeParts.forEach((parts, index) => {
+    if (!dom.excludeInputs[index].disabled) dom.excludeInputs[index].value = joinParts(parts);
+  });
+  filters.excludeChars.forEach((char, index) => {
+    if (!dom.excludeCharInputs[index].disabled) dom.excludeCharInputs[index].value = char;
+  });
+
+  syncPositionLocks();
+  syncFilledInputs();
+  refreshValidation();
+  search();
+}
+
+async function recognizeCurrentAiImage() {
+  if (!aiImageDataUrl) {
+    return;
+  }
+
+  const runId = (aiRecognitionRunId += 1);
+  dom.aiRecognizeButton.disabled = true;
+  setAiStatus('正在识别截图...');
+
+  try {
+    const filters = await recognizeImageFilters(aiImageDataUrl);
+    if (runId !== aiRecognitionRunId) {
+      return;
+    }
+
+    applyRecognitionFilters(filters);
+    setAiStatus(filters.notes ? `已回填：${filters.notes}` : '识别完成，已回填手动条件');
+  } catch (error) {
+    if (runId !== aiRecognitionRunId) {
+      return;
+    }
+
+    console.error(error);
+    setAiStatus(error.message || '识别失败，请检查接口配置和图片内容', true);
+  } finally {
+    if (runId === aiRecognitionRunId) {
+      syncAiImageState();
+    }
   }
 }
 
@@ -150,6 +297,107 @@ const debouncedSearch = debounce(() => {
 
 dom.showMeaningToggle.addEventListener('change', search);
 
+dom.aiDropZone.addEventListener('click', (event) => {
+  if (event.target === dom.aiImageInput) {
+    return;
+  }
+
+  dom.aiImageInput.click();
+});
+
+dom.aiDropZone.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    dom.aiImageInput.click();
+  }
+});
+
+document.addEventListener('dragenter', (event) => {
+  if (!isImageTransfer(event.dataTransfer)) {
+    return;
+  }
+
+  event.preventDefault();
+  aiDragDepth += 1;
+  focusAiRecognition();
+});
+
+document.addEventListener('dragover', (event) => {
+  if (!isImageTransfer(event.dataTransfer)) {
+    return;
+  }
+
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'copy';
+  focusAiRecognition();
+});
+
+document.addEventListener('dragleave', (event) => {
+  if (!isImageTransfer(event.dataTransfer)) {
+    return;
+  }
+
+  aiDragDepth = Math.max(0, aiDragDepth - 1);
+  if (!aiDragDepth || (event.clientX === 0 && event.clientY === 0)) {
+    clearAiDragFocus();
+  }
+});
+
+document.addEventListener('drop', async (event) => {
+  if (!isImageTransfer(event.dataTransfer)) {
+    return;
+  }
+
+  event.preventDefault();
+  clearAiDragFocus();
+  try {
+    await setAiImageFromFileList(event.dataTransfer?.files);
+  } catch (error) {
+    setAiStatus(error.message || '图片读取失败', true);
+  }
+});
+
+document.addEventListener('paste', async (event) => {
+  const target = event.target;
+  const isEditable = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target?.isContentEditable;
+  if (isEditable) {
+    return;
+  }
+
+  const imageItem = Array.from(event.clipboardData?.items || []).find((item) => item.type.startsWith('image/'));
+  if (!imageItem) {
+    return;
+  }
+
+  event.preventDefault();
+  try {
+    await setAiImageFromFile(imageItem.getAsFile());
+  } catch (error) {
+    setAiStatus(error.message || '图片读取失败', true);
+  }
+});
+
+dom.aiImageInput.addEventListener('change', async () => {
+  try {
+    await setAiImageFromFileList(dom.aiImageInput.files);
+  } catch (error) {
+    setAiStatus(error.message || '图片读取失败', true);
+  } finally {
+    dom.aiImageInput.value = '';
+  }
+});
+
+dom.aiClearImageButton.addEventListener('click', () => {
+  aiRecognitionRunId += 1;
+  aiImageDataUrl = '';
+  setAiStatus('等待截图');
+  syncAiImageState();
+});
+
+dom.aiRecognizeButton.addEventListener('click', async () => {
+  await recognizeCurrentAiImage();
+});
+
 dom.results.addEventListener('click', async (event) => {
   const button = event.target.closest('.copy-button');
   if (!button) {
@@ -197,3 +445,4 @@ dom.resetButton.addEventListener('click', () => {
 });
 
 initialize();
+syncAiImageState();

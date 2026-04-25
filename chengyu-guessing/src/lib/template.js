@@ -31,7 +31,7 @@ function createExcludeSlot(index) {
         <span class="field-error"></span>
       </label>
       <label class="compact-field">
-        <span class="field-title">当前排除汉字</span>
+        <span class="field-title">错位汉字</span>
         <input type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="汉字" aria-label="第${index}位不包含汉字" />
       </label>
     </article>
@@ -73,6 +73,36 @@ export function createAppTemplate() {
             </details>
             <button id="resetButton" class="ghost-button" type="button">清空条件</button>
           </div>
+
+          <details id="aiCard" class="condition-card ai-card">
+            <summary class="condition-card-head ai-card-summary">
+              <h3>自动识别</h3>
+              <p>点击、拖入或粘贴截图，自动回填下面的手动条件。</p>
+            </summary>
+
+            <div class="ai-recognition-row">
+              <div
+                id="aiDropZone"
+                class="ai-dropzone"
+                role="button"
+                tabindex="0"
+                aria-label="点击选择图片，拖入图片，或粘贴截图用于自动识别"
+              >
+                <input id="aiImageInput" class="ai-file-input" type="file" accept="image/*" />
+                <img id="aiImagePreview" alt="待识别截图预览" hidden />
+                <div class="ai-dropzone-copy">
+                  <strong>放入截图</strong>
+                  <span>点击选择图片、拖入图片，或聚焦后粘贴截图</span>
+                </div>
+                <span id="aiStatus" class="field-meta">等待截图</span>
+              </div>
+
+              <div class="ai-actions">
+                <button id="aiRecognizeButton" class="ghost-button ai-primary-button" type="button" disabled>识别并回填</button>
+                <button id="aiClearImageButton" class="ai-secondary-button" type="button" disabled>移除图片</button>
+              </div>
+            </div>
+          </details>
 
           <div class="condition-cards">
             <section class="condition-card include-card">
@@ -197,6 +227,13 @@ export function bindDom() {
     globalChars: document.getElementById('globalChars'),
     globalExcludeChars: document.getElementById('globalExcludeChars'),
     globalCharAppendHint: document.getElementById('globalCharAppendHint'),
+    aiCard: document.getElementById('aiCard'),
+    aiDropZone: document.getElementById('aiDropZone'),
+    aiImageInput: document.getElementById('aiImageInput'),
+    aiRecognizeButton: document.getElementById('aiRecognizeButton'),
+    aiClearImageButton: document.getElementById('aiClearImageButton'),
+    aiImagePreview: document.getElementById('aiImagePreview'),
+    aiStatus: document.getElementById('aiStatus'),
     positionCards,
     excludeCards,
     fixedCharInputs: positionCards.map((card) => card.querySelector('[aria-label$="包含汉字"]')),

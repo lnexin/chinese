@@ -11,6 +11,22 @@ npm run dev
 
 默认开发地址：`http://localhost:3000`
 
+`npm run dev` 会同时启动前端 Vite 和后端识别 API。前端请求 `/api/recognize`，Vite 会代理到后端。
+
+## 自动识别 API 配置
+
+OpenAI 兼容接口在后端配置，不会暴露到前端页面或浏览器包里。默认配置位于 `server/ai-config.js`，也可以通过环境变量覆盖：
+
+```bash
+OPENAI_API_HOST=http://127.0.0.1:23333
+OPENAI_API_PATH=/v1/chat/completions
+OPENAI_API_KEY=cs-sk-...
+OPENAI_MODEL=gpt-5.4
+API_PORT=3003
+```
+
+后端会使用 Chat Completions 多模态格式调用 `/v1/chat/completions`，前端只负责上传图片并接收筛选条件。
+
 ## 生产构建
 
 ```bash
